@@ -22,7 +22,7 @@ public class FlightController {
     @PostMapping()
     public ResponseEntity<Flight> createFlight(@RequestBody Flight flight){
         Flight savedFlight = flightService.save(flight);
-        URI location = URI.create("/api/flights/" + savedFlight.getAirline().getCode() + "/" + savedFlight.getId());
+        URI location = URI.create("/api/flights/" + savedFlight.getAirline().getAirlineCode() + "/" + savedFlight.getFlightNumber());
         return ResponseEntity.created(location).body(savedFlight);
     }
 

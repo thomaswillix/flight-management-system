@@ -1,6 +1,9 @@
 package integration;
 
+import model.CargoFlight;
+import model.CommercialFlight;
 import model.Flight;
+import model.FlightState;
 import repository.FlightRepository;
 import service.FlightService;
 import utils.TestDataFactory;
@@ -9,20 +12,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest // Levanta todo el contexto de Spring y la DB H2
-@Transactional   // Hace rollback después de cada test para no ensuciar la DB
+@SpringBootTest
+@Transactional
 class FlightServiceIT {
-    private static final ZoneId MADRID_ZONE = ZoneId.of("Europe/Madrid");
-    private static final ZoneId NEW_YORK_ZONE = ZoneId.of("America/New_York");
-    private static final ZoneId LONDON_ZONE = ZoneId.of("Europe/London");
 
     @Autowired
     private FlightService flightService;
@@ -30,102 +29,103 @@ class FlightServiceIT {
     @Autowired
     private FlightRepository flightRepository;
 
-    @Autowired
-    private TestDataFactory dataFactory;
+    // --- getFlightsListBetweenDates ---
 
     @Test
-    void testFindFlightsByDateInDatabase() {
-        Flight f = new Flight();
-        f.setEstimatedLocalDepartureTime(LocalDateTime.now());
-        flightRepository.save(f);
+    void whenFlightExistsOnDateShouldReturnIt() {
+        LocalDateTime departure = LocalDateTime.now().plusDays(1);
+        LocalDateTime arrival = departure.plusHours(8);
+        CommercialFlight flight = TestDataFactory.buildCommercialFlight(departure, arrival, 100, TestDataFactory.buildPassengers());
+        flightRepository.saveFlight(flight);
 
-        String today = LocalDate.now().toString();
-        List<Flight> resultsToday = flightService.findByDate(today);
+        LocalDate date = departure.toLocalDate();
+        List<Flight> results = flightService.getFlightsListBetweenDates(date, date.plusDays(1));
 
-        String tomorrow = LocalDate.now().plusDays(1).toString();
-        List<Flight> resultsTomorrow = flightService.findByDate(tomorrow);
-
-        assertFalse(resultsToday.isEmpty(), "Debería encontrar el vuelo de hoy");
-        assertTrue(resultsTomorrow.isEmpty(), "No debería encontrar nada para mañana");
+        assertFalse(results.isEmpty());
+        assertTrue(results.contains(flight));
     }
 
     @Test
-    @Transactional
-    void testFindByDate_ShouldReturnOnlySpecificDay() {
-        LocalDateTime today = LocalDateTime.now();
-        LocalDateTime withinFiveDays = today.plusDays(5);
+    void whenNoFlightsOnDateShouldReturnEmpty() {
+        LocalDate pastDate = LocalDate.now().minusDays(10);
 
-        dataFactory.createFlight(
-                "IB", "Iberia",
-                "MAD", "Adolfo Suárez Madrid-Barajas", "Madrid", MADRID_ZONE,
-                "JFK", "John F. Kennedy International", "New York", NEW_YORK_ZONE,
-                today, withinFiveDays.plusHours(8)
-        );
+        List<Flight> results = flightService.getFlightsListBetweenDates(pastDate, pastDate.plusDays(1));
 
-        dataFactory.createFlight(
-                "UA", "United Airlines",
-                "JFK", "John F. Kennedy International", "New York", NEW_YORK_ZONE,
-                "MAD", "Adolfo Suárez Madrid-Barajas", "Madrid", MADRID_ZONE,
-                withinFiveDays, withinFiveDays.plusHours(8)
-        );
-
-        List<Flight> results = flightService.findByDate(withinFiveDays.toLocalDate().toString());
-
-        assertEquals(1, results.size(), "Debería haber exactamente un vuelo");
-        assertEquals("UA", results.get(0).getAirline().getCode());
+        assertTrue(results.isEmpty());
     }
 
     @Test
-    @Transactional
-    void testFindByAirline_ShouldWorkWithAnyCode() {
-        LocalDateTime departure = LocalDateTime.now();
-        Flight saved = dataFactory.createFlight(
-                "VY", "Vueling",
-                "BCN", "Josep Tarradellas Barcelona-El Prat", "Barcelona", MADRID_ZONE,
-                "LGW", "London Gatwick", "London", LONDON_ZONE,
-                departure, departure.plusHours(2)
+    void whenFlightsOnDifferentDatesShouldReturnOnlyRequested() {
+        LocalDateTime todayDeparture = LocalDateTime.now().plusDays(1);
+        LocalDateTime futureDeparture = LocalDateTime.now().plusDays(5);
+
+        CommercialFlight flightToday = TestDataFactory.buildCommercialFlight(
+                todayDeparture, todayDeparture.plusHours(8), 100, TestDataFactory.buildPassengers()
         );
+        CargoFlight flightFuture = TestDataFactory.buildCargoFlight(
+                futureDeparture, futureDeparture.plusHours(8), BigDecimal.valueOf(5000)
+        );
+        flightRepository.saveFlight(flightToday);
+        flightRepository.saveFlight(flightFuture);
 
-        Optional<Flight> found = flightService.findByAirlineAndNumber("VY", saved.getId());
+        LocalDate from = futureDeparture.toLocalDate();
+        LocalDate to = from.plusDays(1);
+        List<Flight> results = flightService.getFlightsListBetweenDates(from, to);
 
-        assertTrue(found.isPresent());
-        assertEquals("BCN", found.get().getOrigin().getIataCode());
-        assertEquals("Vueling", found.get().getAirline().getName());
+        assertEquals(1, results.size());
+        assertTrue(results.contains(flightFuture));
+    }
+
+    // --- saveFlight / findFlightByNumber ---
+
+    @Test
+    void whenSaveValidFlightShouldPersistInDB() {
+        CommercialFlight flight = TestDataFactory.buildValidFlight();
+        flightRepository.saveFlight(flight);
+
+        Flight found = flightRepository.findFlightByNumber(TestDataFactory.buildAirline(), "FL001");
+
+        assertNotNull(found);
+        assertEquals("IB", found.getAirline().getAirlineCode());
+        assertEquals("MAD", found.getOrigin().getIataCode());
+    }
+
+    // --- updateFlightState ---
+
+    @Test
+    void whenUpdateFlightStateShouldPersistNewState() {
+        CommercialFlight flight = TestDataFactory.buildValidFlight();
+        flightRepository.saveFlight(flight);
+
+        flightService.updateFlightState("FL001", TestDataFactory.buildAirline(), FlightState.DELAYED);
+
+        Flight updated = flightRepository.findFlightByNumber(TestDataFactory.buildAirline(), "FL001");
+        assertEquals(FlightState.DELAYED, updated.getFlightState());
     }
 
     @Test
-    @Transactional
-    void testFindByAirlineAndNumber_ShouldReturnCorrectFlight() {
-        LocalDateTime now = LocalDateTime.now();
-
-        Flight flightIB = dataFactory.createFlight(
-                "IB", "Iberia", "MAD", "Barajas", "Madrid", MADRID_ZONE,
-                "LHR", "Heathrow", "London", LONDON_ZONE, now, now.plusHours(2)
+    void whenUpdateFlightStateWithInvalidFlightShouldThrow() {
+        assertThrows(IllegalArgumentException.class, () ->
+                flightService.updateFlightState("XX9999", TestDataFactory.buildAirline(), FlightState.DELAYED)
         );
-
-        Flight flightUA = dataFactory.createFlight(
-                "UA", "United", "EWR", "Newark",
-                "New Jersey", NEW_YORK_ZONE, "MAD", "Barajas",
-                "Madrid", MADRID_ZONE, now, now.plusHours(7)
-        );
-
-        Optional<Flight> found = flightService.findByAirlineAndNumber("IB", flightIB.getId());
-
-        assertTrue(found.isPresent(), "El vuelo de Iberia debería existir");
-        assertEquals("IB", found.get().getAirline().getCode());
-
-        Optional<Flight> notFound = flightService.findByAirlineAndNumber("UA", flightIB.getId());
-        assertTrue(notFound.isEmpty(), "No debería encontrarlo si el código de aerolínea está mal");
     }
+
+    // --- getAirlineFlightsQuantity ---
+
     @Test
-    void whenSaveValidFlight_thenPersistsInDB() {
-        Flight saved = dataFactory.createValidFlight();
+    void whenAirlineHasFlightsShouldReturnCorrectCount() {
+        LocalDateTime departure = LocalDateTime.now().plusDays(1);
+        CommercialFlight flight1 = TestDataFactory.buildCommercialFlight(
+                departure, departure.plusHours(8), 100, TestDataFactory.buildPassengers()
+        );
+        CargoFlight flight2 = TestDataFactory.buildCargoFlight(
+                departure.plusDays(1), departure.plusDays(1).plusHours(8), BigDecimal.valueOf(3000)
+        );
+        flightRepository.saveFlight(flight1);
+        flightRepository.saveFlight(flight2);
 
-        Optional<Flight> found = flightRepository.findById(saved.getId());
+        int result = flightService.getAirlineFlightsQuantity(TestDataFactory.buildAirline());
 
-        assertTrue(found.isPresent());
-        assertEquals("IB", found.get().getAirline().getCode());
-        assertEquals("MAD", found.get().getOrigin().getIataCode());
+        assertEquals(2, result);
     }
-
 }

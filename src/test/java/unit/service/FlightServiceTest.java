@@ -1,6 +1,8 @@
 package unit.service;
 
-import model.Flight;
+import model.*;
+import notification.FlightStateListener;
+import org.junit.jupiter.api.BeforeEach;
 import repository.AirlineRepository;
 import repository.AirplaneRepository;
 import repository.AirportRepository;
@@ -8,184 +10,331 @@ import repository.FlightRepository;
 import service.FlightService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import utils.TestDataFactory;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
-import static utils.TestDataFactory.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class FlightServiceTest {
 
-    @Mock private FlightRepository flightRepository;
-    @Mock private AirportRepository airportRepository;
-    @Mock private AirlineRepository airlineRepository;
-    @Mock private AirplaneRepository airplaneRepository;
+    private FlightRepository flightRepository;
+    private AirlineRepository airlineRepository;
+    private AirportRepository airportRepository;
+    private AirplaneRepository airplaneRepository;
 
-    @InjectMocks private FlightService flightService;
+    private FlightStateListener emailListener;
+    private FlightStateListener smsListener;
+
+    private FlightService flightService;
+
+    private Airline airline;
+    private CommercialFlight commercialFlight;
+    private CargoFlight cargoFlight;
+
+    @BeforeEach
+    void setUp() {
+        airline = TestDataFactory.buildAirline();
+        flightRepository = mock(FlightRepository.class);
+        airlineRepository = mock(AirlineRepository.class);
+        emailListener = mock(FlightStateListener.class);
+        smsListener = mock(FlightStateListener.class);
+
+        flightService = new FlightService(flightRepository,List.of(emailListener, smsListener),
+                airportRepository, airlineRepository,airplaneRepository);
+
+        LocalDateTime departure = LocalDateTime.now().plusDays(1);
+        LocalDateTime arrival = departure.plusHours(8);
+
+        commercialFlight = TestDataFactory.buildCommercialFlight(
+                departure, arrival, 100, TestDataFactory.buildPassengers()
+        );
+        cargoFlight = TestDataFactory.buildCargoFlight(
+                departure, arrival, BigDecimal.valueOf(5000)
+        );
+    }
+
+    // --- getAirlineFlightsQuantity ---
 
     @Test
-    void whenSearchByDate_thenReturnFlightList() {
-        LocalDateTime now = LocalDateTime.now();
-        Flight mockFlight = new Flight();
-        mockFlight.setEstimatedLocalDepartureTime(now);
+    public void whenAirlineIsValidShouldReturnFlightsQuantity() {
+        when(flightRepository.findAllFlightsByAirline(airline.getAirlineCode()))
+                .thenReturn(List.of(commercialFlight, cargoFlight));
 
-        when(flightRepository.findByEstimatedLocalDepartureTimeBetween(any(), any()))
-                .thenReturn(List.of(mockFlight));
+        int result = flightService.getAirlineFlightsQuantity(airline);
 
-        List<Flight> result = flightService.findByDate(String.valueOf(now.toLocalDate()));
-        System.out.println(result.get(0).toString());
-
-        assertFalse(result.isEmpty());
-        assertEquals(now, result.get(0).getEstimatedLocalDepartureTime());
-        verify(flightRepository, times(1)).findByEstimatedLocalDepartureTimeBetween(any(), any());
+        assertEquals(2, result);
     }
 
     @Test
-    void whenSearchByBlank_thenReturnError() {
+    public void whenAirlineIsNullOnGetQuantityShouldThrowException() {
+        NullPointerException exception = assertThrows(NullPointerException.class, () ->
+                flightService.getAirlineFlightsQuantity(null)
+        );
+        assertEquals("Airline can't be null", exception.getMessage());
+    }
+
+    // --- getPassengersList ---
+
+    @Test
+    public void whenFlightIsCommercialShouldReturnPassengersList() {
+        when(flightRepository.findFlightByNumber(airline, "FL001"))
+                .thenReturn(commercialFlight);
+
+        List<Passenger> result = flightService.getPassengersList("FL001", airline);
+
+        assertEquals(TestDataFactory.buildPassengers().size(), result.size());
+    }
+
+    @Test
+    public void whenFlightIsCargoShouldThrowUnsupportedOperationException() {
+        when(flightRepository.findFlightByNumber(airline, "FL001"))
+                .thenReturn(cargoFlight);
+
+        UnsupportedOperationException exception = assertThrows(UnsupportedOperationException.class, () ->
+                flightService.getPassengersList("FL001", airline)
+        );
+        assertEquals("Cargo flights do not have passengers", exception.getMessage());
+    }
+
+    @Test
+    public void whenFlightIsNotFoundShouldThrowIllegalArgumentException() {
+        when(flightRepository.findFlightByNumber(airline, "XX9999"))
+                .thenReturn(null);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                flightService.getPassengersList("XX9999", airline)
+        );
+        assertEquals("Flight was not found", ex.getMessage());
+    }
+
+    @Test
+    public void whenFlightNumberIsNullShouldThrowException() {
+        NullPointerException exception = assertThrows(NullPointerException.class, () ->
+                flightService.getPassengersList(null, airline)
+        );
+        assertEquals("Flight number can't be null", exception.getMessage());
+    }
+
+    @Test
+    public void whenFlightNumberIsBlankShouldThrowException() {
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
-                flightService.findByDate(""));
-
-        assertEquals("La fecha no puede estar vacía.", exception.getMessage());
-
-        verifyNoInteractions(flightRepository);
+                flightService.getPassengersList("", airline)
+        );
+        assertEquals("Flight number can't be blank", exception.getMessage());
     }
 
     @Test
-    void whenSearchByInvalidDateFormat_thenReturnError() {
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
-                flightService.findByDate("invalid-date"));
+    public void whenAirlineIsNullOnGetPassengersShouldThrowException() {
+        NullPointerException exception = assertThrows(NullPointerException.class, () ->
+                flightService.getPassengersList("FL001", null)
+        );
+        assertEquals("Airline can't be null", exception.getMessage());
+    }
 
-        assertEquals("Formato inválido. Use YYYY-MM-DD.", exception.getMessage());
+    // --- getFlightsListBetweenDates ---
 
-        verifyNoInteractions(flightRepository);
+    @Test
+    public void whenDatesAreValidShouldReturnFlightsBetweenDates() {
+        LocalDate departure = LocalDate.of(2024, 1, 1);
+        LocalDate arrival = LocalDate.of(2024, 1, 3);
+        when(flightRepository.findFlightsByDate(LocalDate.of(2024, 1, 1)))
+                .thenReturn(List.of(commercialFlight));
+        when(flightRepository.findFlightsByDate(LocalDate.of(2024, 1, 2)))
+                .thenReturn(List.of(cargoFlight));
+
+        List<Flight> result = flightService.getFlightsListBetweenDates(departure, arrival);
+
+        assertEquals(2, result.size());
     }
 
     @Test
-    void whenOriginNotFoundInDB_thenThrowsException() {
-        Flight flight = buildValidFlight();
-        when(airportRepository.findById(flight.getOrigin().getIataCode())).thenReturn(Optional.empty());
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> flightService.save(flight));
-        assertEquals("El aeropuerto de origen no existe.", ex.getMessage());
+    public void whenDepartureDateIsNullShouldThrowException() {
+        NullPointerException exception = assertThrows(NullPointerException.class, () ->
+                flightService.getFlightsListBetweenDates(null, LocalDate.of(2024, 1, 3))
+        );
+        assertEquals("Departure date can't be null", exception.getMessage());
     }
 
     @Test
-    void whenDestinationNotFoundInDB_thenThrowsException() {
-        Flight flight = buildValidFlight();
-        when(airportRepository.findById(flight.getOrigin().getIataCode())).thenReturn(Optional.of(flight.getOrigin()));
-        when(airportRepository.findById(flight.getDestination().getIataCode())).thenReturn(Optional.empty());
+    public void whenArrivalDateIsNullShouldThrowException() {
+        NullPointerException exception = assertThrows(NullPointerException.class, () ->
+                flightService.getFlightsListBetweenDates(LocalDate.of(2024, 1, 1), null)
+        );
+        assertEquals("Arrival date can't be null", exception.getMessage());
+    }
 
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> flightService.save(flight));
-        assertEquals("El aeropuerto de destino no existe.", ex.getMessage());
+    // --- getFlightsQuantityPerAirline ---
+
+    @Test
+    public void whenAirlinesExistShouldReturnMapWithFlightsPerAirline() {
+        Airline secondAirline = new Airline("UA", "United");
+        when(airlineRepository.findAllAirlines()).thenReturn(List.of(airline, secondAirline));
+        when(flightRepository.findAllFlightsByAirline(airline.getAirlineCode()))
+                .thenReturn(List.of(commercialFlight));
+        when(flightRepository.findAllFlightsByAirline(secondAirline.getAirlineCode()))
+                .thenReturn(List.of(cargoFlight, commercialFlight));
+
+        Map<Airline, Integer> result = flightService.getFlightsQuantityPerAirline();
+
+        assertEquals(1, result.get(airline));
+        assertEquals(2, result.get(secondAirline));
     }
 
     @Test
-    void whenAirlineNotFoundInDB_thenThrowsException() {
-        Flight flight = buildValidFlight();
-        when(airportRepository.findById(flight.getOrigin().getIataCode())).thenReturn(Optional.of(flight.getOrigin()));
-        when(airportRepository.findById(flight.getDestination().getIataCode())).thenReturn(Optional.of(flight.getDestination()));
-        when(airlineRepository.findById(flight.getAirline().getCode())).thenReturn(Optional.empty());
+    public void whenNoAirlinesExistShouldReturnEmptyMap() {
+        when(airlineRepository.findAllAirlines()).thenReturn(List.of());
 
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> flightService.save(flight));
-        assertEquals("La aerolínea no existe.", ex.getMessage());
-    }
-
-    @Test
-    void whenPlaneNotFoundInDB_thenThrowsException() {
-        Flight flight = buildValidFlight();
-        when(airportRepository.findById(flight.getOrigin().getIataCode())).thenReturn(Optional.of(flight.getOrigin()));
-        when(airportRepository.findById(flight.getDestination().getIataCode())).thenReturn(Optional.of(flight.getDestination()));
-        when(airlineRepository.findById(flight.getAirline().getCode())).thenReturn(Optional.of(flight.getAirline()));
-        when(airplaneRepository.findById(flight.getPlane().getId())).thenReturn(Optional.empty());
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> flightService.save(flight));
-        assertEquals("El avión no existe.", ex.getMessage());
-    }
-
-    @Test
-    void whenAllFieldsValid_thenSavesFlight() {
-        Flight flight = buildValidFlight();
-
-        when(airportRepository.findById(flight.getOrigin().getIataCode())).thenReturn(Optional.of(flight.getOrigin()));
-        when(airportRepository.findById(flight.getDestination().getIataCode())).thenReturn(Optional.of(flight.getDestination()));
-        when(airlineRepository.findById(flight.getAirline().getCode())).thenReturn(Optional.of(flight.getAirline()));
-        when(airplaneRepository.findById(flight.getPlane().getId())).thenReturn(Optional.of(flight.getPlane()));
-        when(flightRepository.save(any())).thenReturn(flight);
-
-        assertNotNull(flightService.save(flight));
-        verify(flightRepository).save(flight);
-    }
-
-    @Test
-    void whenOriginIsNull_thenThrowsException() {
-        Flight flight = buildFlightWithNullOrigin();
-
-        assertThrows(IllegalArgumentException.class, () -> flightService.save(flight));
-    }
-
-    @Test
-    void whenDestinationIsNull_thenThrowsException() {
-        Flight flight = buildFlightWithNullDestination();
-        // Origin existis but destination doesn't
-        when(airportRepository.findById(flight.getOrigin().getIataCode())).thenReturn(Optional.of(flight.getOrigin()));
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> flightService.save(flight));
-        assertEquals("El aeropuerto de destino no existe.", ex.getMessage());
-    }
-
-    @Test
-    void whenAirlineIsNull_thenThrowsException() {
-        Flight flight = buildFlightWithNullAirline();
-        when(airportRepository.findById(flight.getOrigin().getIataCode())).thenReturn(Optional.of(flight.getOrigin()));
-        when(airportRepository.findById(flight.getDestination().getIataCode())).thenReturn(Optional.of(flight.getDestination()));
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> flightService.save(flight));
-        assertEquals("La aerolínea no existe.", ex.getMessage());
-    }
-
-    @Test
-    void whenPlaneIsNull_thenThrowsException() {
-        Flight flight = buildFlightWithNullPlane();
-        when(airportRepository.findById(flight.getOrigin().getIataCode())).thenReturn(Optional.of(flight.getOrigin()));
-        when(airportRepository.findById(flight.getDestination().getIataCode())).thenReturn(Optional.of(flight.getDestination()));
-        when(airlineRepository.findById(flight.getAirline().getCode())).thenReturn(Optional.of(flight.getAirline()));
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> flightService.save(flight));
-        assertEquals("El avión no existe.", ex.getMessage());
-    }
-
-    @Test
-    void whenFlightExistsByAirlineAndNumber_thenReturnsIt() {
-        Flight flight = buildValidFlight();
-        when(flightRepository.findByAirlineCodeAndId(flight.getAirline().getCode(), 1L)).thenReturn(Optional.of(flight));
-
-        Optional<Flight> result = flightService.findByAirlineAndNumber(flight.getAirline().getCode(), 1L);
-
-        assertTrue(result.isPresent());
-        assertEquals(flight, result.get());
-    }
-
-    @Test
-    void whenFlightNotExistsByAirlineAndNumber_thenReturnsEmpty() {
-        Flight flight = buildValidFlight();
-        when(flightRepository.findByAirlineCodeAndId(flight.getAirline().getCode(), 99L)).thenReturn(Optional.empty());
-
-        Optional<Flight> result = flightService.findByAirlineAndNumber(flight.getAirline().getCode(), 99L);
+        Map<Airline, Integer> result = flightService.getFlightsQuantityPerAirline();
 
         assertTrue(result.isEmpty());
+    }
+
+    // --- getAverageFlightWeightByAirlineCode ---
+
+    @Test
+    public void whenAirlineCodeIsValidShouldReturnAverageWeight() {
+        CargoFlight secondCargoFlight = TestDataFactory.buildCargoFlight(
+                LocalDateTime.now().plusDays(2),
+                LocalDateTime.now().plusDays(2).plusHours(8),
+                BigDecimal.valueOf(3000)
+        );
+        when(airlineRepository.findAirlineByCode("IB")).thenReturn(airline);
+        when(flightRepository.findAllFlightsByAirline(airline.getName()))
+                .thenReturn(List.of(cargoFlight, secondCargoFlight));
+
+        BigDecimal airplaneWeight = TestDataFactory.buildAirplane().getAirplaneWeight(); // 40000
+        BigDecimal expected = airplaneWeight.add(BigDecimal.valueOf(5000))   // 45000
+                .add(airplaneWeight.add(BigDecimal.valueOf(3000)))           // + 43000
+                .divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);        // = 44000
+
+        BigDecimal result = flightService.getAverageFlightWeightByAirlineCode("IB");
+
+        assertEquals(expected, result);
+    }
+
+    @Test
+    public void whenAirlineCodeIsNullOnGetAverageShouldThrowException() {
+        NullPointerException exception = assertThrows(NullPointerException.class, () ->
+                flightService.getAverageFlightWeightByAirlineCode(null)
+        );
+        assertEquals("Airline code can't be null", exception.getMessage());
+    }
+
+    @Test
+    public void whenAirlineCodeIsInvalidOnGetAverageShouldThrowException() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                flightService.getAverageFlightWeightByAirlineCode("INVALID")
+        );
+        assertEquals("Airline code must be exactly 2 uppercase letters (e.g. IB, UA)", exception.getMessage());
+    }
+
+    // --- getAllCommercialFlightsFromAirline ---
+
+    @Test
+    public void whenAirlineHasCommercialFlightsShouldReturnOnlyCommercialFlights() {
+        when(airlineRepository.findAirlineByCode("IB")).thenReturn(airline);
+        when(flightRepository.findAllFlightsByAirline(airline.getName()))
+                .thenReturn(List.of(commercialFlight, cargoFlight));
+
+        List<Flight> result = flightService.getAllCommercialFlightsFromAirline("IB");
+
+        assertEquals(1, result.size());
+        assertInstanceOf(CommercialFlight.class, result.get(0));
+    }
+
+    @Test
+    public void whenAirlineHasNoCommercialFlightsShouldReturnEmptyList() {
+        when(airlineRepository.findAirlineByCode("IB")).thenReturn(airline);
+        when(flightRepository.findAllFlightsByAirline(airline.getName()))
+                .thenReturn(List.of(cargoFlight));
+
+        List<Flight> result = flightService.getAllCommercialFlightsFromAirline("IB");
+
+        assertTrue(result.isEmpty());
+    }
+
+    // --- getAllCargoFlightsFromAirline ---
+
+    @Test
+    public void whenAirlineHasCargoFlightsShouldReturnOnlyCargoFlights() {
+        when(airlineRepository.findAirlineByCode("IB")).thenReturn(airline);
+        when(flightRepository.findAllFlightsByAirline(airline.getName()))
+                .thenReturn(List.of(commercialFlight, cargoFlight));
+
+        List<Flight> result = flightService.getAllCargoFlightsFromAirline("IB");
+
+        assertEquals(1, result.size());
+        assertInstanceOf(CargoFlight.class, result.get(0));
+    }
+
+    @Test
+    public void whenAirlineHasNoCargoFlightsShouldReturnEmptyList() {
+        when(airlineRepository.findAirlineByCode("IB")).thenReturn(airline);
+        when(flightRepository.findAllFlightsByAirline(airline.getName()))
+                .thenReturn(List.of(commercialFlight));
+
+        List<Flight> result = flightService.getAllCargoFlightsFromAirline("IB");
+
+        assertTrue(result.isEmpty());
+    }
+
+    // --- updateFlightState ---
+
+    @Test
+    public void whenFlightExistsAndStateIsValidShouldUpdateState() {
+        when(flightRepository.findFlightByNumber(airline, "FL001"))
+                .thenReturn(commercialFlight);
+
+        flightService.updateFlightState("FL001", airline, FlightState.DELAYED);
+
+        assertEquals(FlightState.DELAYED, commercialFlight.getFlightState());
+        verify(emailListener).onStateChange(commercialFlight);
+        verify(smsListener).onStateChange(commercialFlight);
+    }
+
+    @Test
+    public void whenFlightIsCargoShouldUpdateStateAndNotify() {
+        when(flightRepository.findFlightByNumber(airline, "FL001"))
+                .thenReturn(cargoFlight);
+
+        flightService.updateFlightState("FL001", airline, FlightState.DELAYED);
+
+        assertEquals(FlightState.DELAYED, cargoFlight.getFlightState());
+        verify(emailListener).onStateChange(cargoFlight);
+        verify(smsListener).onStateChange(cargoFlight);
+    }
+
+    @Test
+    public void whenFlightIsNotFoundOnUpdateShouldThrowException() {
+        when(flightRepository.findFlightByNumber(airline, "XX9999"))
+                .thenReturn(null);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                flightService.updateFlightState("XX9999", airline, FlightState.DELAYED)
+        );
+        assertEquals("Flight was not found", ex.getMessage());
+        verify(emailListener, never()).onStateChange(any());
+        verify(smsListener, never()).onStateChange(any());
+    }
+
+    @Test
+    public void whenStateIsNullOnUpdateShouldThrowException() {
+        when(flightRepository.findFlightByNumber(airline, "FL001"))
+                .thenReturn(commercialFlight);
+
+        assertThrows(NullPointerException.class, () ->
+                flightService.updateFlightState("FL001", airline, null)
+        );
+        verify(emailListener, never()).onStateChange(any());
+        verify(smsListener, never()).onStateChange(any());
     }
 }

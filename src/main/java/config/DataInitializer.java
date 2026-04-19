@@ -32,7 +32,7 @@ public class DataInitializer implements CommandLineRunner {
     public void run(String... args) {
         // 1. Crear Aerolínea
         Airline iberia = new Airline();
-        iberia.setCode("IB");
+        iberia.setAirlineCode("IB");
         iberia.setName("Iberia");
         airlineRepository.save(iberia);
 
@@ -55,7 +55,6 @@ public class DataInitializer implements CommandLineRunner {
         Airplane boeing = new Airplane();
         boeing.setBrand("Boeing");
         boeing.setModel("787 Dreamliner");
-        boeing.setCapacity(250);
         airplaneRepository.save(boeing);
 
         // 4. Crear Vuelo (Hoy)
@@ -63,10 +62,10 @@ public class DataInitializer implements CommandLineRunner {
         f1.setAirline(iberia);
         f1.setOrigin(mad);
         f1.setDestination(jfk);
-        f1.setPlane(boeing);
+        f1.setAirplane(boeing);
         f1.setEstimatedLocalDepartureTime(LocalDateTime.now());
         f1.setEstimatedLocalArrivalTime(LocalDateTime.now().plusHours(8));
-        flightRepository.save(f1);
+        flightRepository.saveFlight(f1);
 
         System.out.println(">> Datos de prueba cargados correctamente.");
     }

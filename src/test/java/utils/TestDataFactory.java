@@ -1,9 +1,6 @@
 package utils;
 
-import model.Airline;
-import model.Airplane;
-import model.Airport;
-import model.Flight;
+import model.*;
 import repository.AirlineRepository;
 import repository.AirplaneRepository;
 import repository.AirportRepository;
@@ -11,8 +8,11 @@ import repository.FlightRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.HashSet;
+import java.util.Set;
 
 @Component
 public class TestDataFactory {
@@ -24,115 +24,85 @@ public class TestDataFactory {
     @Autowired private AirportRepository airportRepository;
     @Autowired private AirplaneRepository airplaneRepository;
 
-    public Flight createFlight(
-            String airlineCode, String airlineName,
-            String originIata, String originName, String originCity, ZoneId originTimeZone,
-            String destIata, String destName, String destCity, ZoneId destinationTimeZone,
-            LocalDateTime departure, LocalDateTime arrival
-    ) {
-        Airline airline = airlineRepository.save(buildAirline(airlineCode, airlineName));
-        Airport origin = airportRepository.save(buildAirport(originIata, originName, originCity, originTimeZone));
-        Airport dest = airportRepository.save(buildAirport(destIata, destName, destCity, destinationTimeZone));
-        Airplane plane = airplaneRepository.save(buildAirplane());
+    public static final ZoneId MADRID_ZONE = ZoneId.of("Europe/Madrid");
+    public static final ZoneId NEW_YORK_ZONE = ZoneId.of("America/New_York");
 
-        Flight f = new Flight();
-        f.setAirline(airline);
-        f.setOrigin(origin);
-        f.setDestination(dest);
-        f.setPlane(plane);
-        f.setEstimatedLocalDepartureTime(departure);
-        f.setEstimatedLocalArrivalTime(arrival);
+    private static final LocalDateTime DEFAULT_DEPARTURE = LocalDateTime.now().plusDays(1);
+    private static final LocalDateTime DEFAULT_ARRIVAL = DEFAULT_DEPARTURE.plusHours(8);
+    private static final Airport MAD = buildAirPort("MAD", "Adolfo Suárez Madrid-Barajas", "Madrid", MADRID_ZONE);
+    private static final Airport JFK = buildAirPort("JFK", "John F. Kennedy International", "New York", NEW_YORK_ZONE);
 
-        return flightRepository.save(f);
-    }
-
-    public Flight createValidFlight() {
-        LocalDateTime departure = LocalDateTime.now().plusDays(1);
-        ZoneId madridZone = ZoneId.of("Europe/Madrid");
-        ZoneId newYorkZone = ZoneId.of("US/Eastern");
-        return createFlight(
-                "IB", "Iberia",
-                "MAD", "Adolfo Suárez Madrid-Barajas", "Madrid", madridZone,
-                "JFK", "John F. Kennedy International", "New York", newYorkZone,
-                departure, departure.plusHours(8)
-        );
-    }
-
-    // ESTÁTICOS: para tests unitarios, sin BD
-
-    public static Airline buildAirline(String code, String name) {
-        Airline a = new Airline();
-        a.setCode(code);
-        a.setName(name);
-        return a;
-    }
-
-    public static Airport buildAirport(String iata, String name, String city, ZoneId zone) {
-        Airport a = new Airport();
-        a.setIataCode(iata);
-        a.setAirportName(name);
-        a.setCity(city);
-        a.setTimeZone(zone);
-        return a;
+    public static Airline buildAirline() {
+        return new Airline("IB", "Iberia");
     }
 
     public static Airplane buildAirplane() {
-        Airplane a = new Airplane();
-        a.setBrand("Boeing");
-        a.setModel("787 Dreamliner");
-        a.setCapacity(250);
-        return a;
+        return new Airplane("Boeing", "727-800", BigDecimal.valueOf(40000));
     }
 
-    public static Flight buildFlight(
-            String airlineCode, String airlineName,
-            String originIata, String originName, String originCity, ZoneId originTimeZone,
-            String destIata, String destName, String destCity, ZoneId destinationTimeZone,
-            LocalDateTime departure, LocalDateTime arrival
-    ) {
-        Flight f = new Flight();
-        f.setAirline(buildAirline(airlineCode, airlineName));
-        f.setOrigin(buildAirport(originIata, originName, originCity, originTimeZone));
-        f.setDestination(buildAirport(destIata, destName, destCity, destinationTimeZone));
-        f.setPlane(buildAirplane());
-        f.setEstimatedLocalDepartureTime(departure);
-        f.setEstimatedLocalArrivalTime(arrival);
-        return f;
+    public static Airport buildAirPort(String iataCode, String airportName, String city, ZoneId timezone){
+        return new Airport(iataCode, airportName, city, timezone);
     }
 
-    public static Flight buildValidFlight() {
-        LocalDateTime departure = LocalDateTime.now().plusDays(1);
-        ZoneId madridZone = ZoneId.of("Europe/Madrid");
-        ZoneId newYorkZone = ZoneId.of("America/New_York");
-        return buildFlight(
-                "IB", "Iberia",
-                "MAD", "Adolfo Suárez Madrid-Barajas", "Madrid", madridZone,
-                "JFK", "John F. Kennedy International", "New York", newYorkZone,
-                departure, departure.plusHours(8)
-        );
+    public static Set<Passenger> buildPassengers() {
+        Set<Passenger> passengers = new HashSet<>();
+        passengers.add(new Passenger("29934099J", "María",   "Martín",    "612345678"));
+        passengers.add(new Passenger("18158342A", "Carlos",  "García",    "623456789"));
+        passengers.add(new Passenger("48204888Q", "Laura",   "López",     "634567890"));
+        passengers.add(new Passenger("80185884H", "Javier",  "Sánchez",   "645678901"));
+        passengers.add(new Passenger("77271803Z", "Sofía",   "Fernández", "656789012"));
+        passengers.add(new Passenger("31727850V", "Miguel",  "González",  "667890123"));
+        passengers.add(new Passenger("22292824M", "Ana",     "Rodríguez", "678901234"));
+        passengers.add(new Passenger("94416654K", "Pablo",   "Pérez",     "689012345"));
+        passengers.add(new Passenger("14495172C", "Elena",   "Ramírez",   "690123456"));
+        passengers.add(new Passenger("40186357K", "Andrés",  "Torres",    "611234567"));
+        return passengers;
+    }
+
+    public static CargoFlight buildCargoFlight(LocalDateTime departure, LocalDateTime arrival, BigDecimal cargoWeight) {
+        return new CargoFlight("FL001", buildAirline(), buildAirplane(),
+                MAD, JFK,
+                departure, arrival, departure, arrival, null, null,
+                FlightState.ON_TIME, cargoWeight);
+    }
+
+    public static CommercialFlight buildCommercialFlight(LocalDateTime departure, LocalDateTime arrival,
+                                                         Integer capacity, Set<Passenger> passengers) {
+        return new CommercialFlight("FL001", buildAirline(), buildAirplane(),
+                MAD, JFK,
+                departure, arrival, departure, arrival, null, null,
+                FlightState.ON_TIME, passengers, capacity);
+    }
+
+    public static CommercialFlight buildValidFlight() {
+        return buildCommercialFlight(DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, 100, buildPassengers());
     }
 
     public static Flight buildFlightWithNullOrigin() {
-        Flight f = buildValidFlight();
-        f.setOrigin(null);
-        return f;
+        return new CommercialFlight("FL001", buildAirline(), buildAirplane(),
+                null, JFK,
+                DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, null, null,
+                FlightState.ON_TIME, buildPassengers(), 100);
     }
 
     public static Flight buildFlightWithNullDestination() {
-        Flight f = buildValidFlight();
-        f.setDestination(null);
-        return f;
+        return new CommercialFlight("FL001", buildAirline(), buildAirplane(),
+                MAD, null,
+                DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, null, null,
+                FlightState.ON_TIME, buildPassengers(), 100);
     }
 
     public static Flight buildFlightWithNullAirline() {
-        Flight f = buildValidFlight();
-        f.setAirline(null);
-        return f;
+        return new CommercialFlight("FL001", null, buildAirplane(),
+                MAD, JFK,
+                DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, null, null,
+                FlightState.ON_TIME, buildPassengers(), 100);
     }
 
-    public static Flight buildFlightWithNullPlane() {
-        Flight f = buildValidFlight();
-        f.setPlane(null);
-        return f;
+    public static Flight buildFlightWithNullAirplane() {
+        return new CommercialFlight("FL001", buildAirline(), null,
+                MAD, JFK,
+                DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, DEFAULT_DEPARTURE, DEFAULT_ARRIVAL, null, null,
+                FlightState.ON_TIME, buildPassengers(), 100);
     }
 }
